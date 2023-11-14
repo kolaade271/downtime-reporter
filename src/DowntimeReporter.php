@@ -2,6 +2,9 @@
 
 namespace DowntimeReporter;
 
+use GuzzleHttp\Client;
+use GuzzleHttp\Promise;
+
 class DowntimeReporter {
     private $serverCondition;
     private $disallowedHttpStatusCodes;
@@ -11,56 +14,48 @@ class DowntimeReporter {
         $this->disallowedHttpStatusCodes = $disallowedHttpStatusCodes;
     }
 
-    public function reportDowntime($url, $appName, $apiEndpoint) {
+    public function reportDowntime($appName, $apiEndpoint) {
         // Check if the server is not in a good position
         if (!$this->serverCondition) {
             return null; // Do nothing if the server is not in a good position
         }
 
-        // Get the HTTP status of the server
-        $httpStatus = $this->getHttpStatus($url);
+        // Get the HTTP status code of the current script's resource
+        $httpStatus = $this->getScriptHttpStatus();
 
         // Check if the HTTP status is in the disallowed list
         if (in_array($httpStatus, $this->disallowedHttpStatusCodes)) {
             return null; // Do nothing if the HTTP status is in the disallowed list
         }
 
-        $data = [
-            'url' => $url,
-            'app_name' => $appName,
-            'status_code' => $httpStatus,
-        ];
+        // Send the HTTP status code to the specified API endpoint asynchronously
+        $this->sendPostRequestAsync($apiEndpoint, ['app_name' => $appName, 'status_code' => $httpStatus]);
 
-        $response = $this->sendPostRequest($apiEndpoint, $data);
-
-        $decodedResponse = json_decode($response, true);
-
-        // Check if the downtime report was unsuccessful
-        if ($decodedResponse && isset($decodedResponse['error'])) {
-           return $decodedResponse['error'];
-        }
-
-        return $decodedResponse;
+        // Return the result without waiting for the response
+        return ['app_name' => $appName, 'status_code' => $httpStatus];
     }
 
-    private function getHttpStatus($url) {
-        $headers = get_headers($url, 1);
-        $httpStatus = isset($headers[0]) ? substr($headers[0], 9, 3) : null;
-        return $httpStatus !== null ? (int)$httpStatus : null;
+    private function sendPostRequestAsync($url, $data) {
+        $client = new Client();
+
+        // Use Guzzle's async request
+        $promise = $client->postAsync($url, [
+            'json' => $data,
+        ]);
+
+        // You can handle the promise here if needed
+        $promise->then(
+            function ($response) {
+                // Handle the response if necessary
+            },
+            function ($reason) {
+                // Handle the error if necessary
+            }
+        );
     }
 
-    private function sendPostRequest($url, $data) {
-        $options = [
-            'http' => [
-                'header'  => "Content-type: application/json\r\n",
-                'method'  => 'POST',
-                'content' => json_encode($data),
-            ],
-        ];
-
-        $context = stream_context_create($options);
-        $result = file_get_contents($url, false, $context);
-
-        return $result;
+    private function getScriptHttpStatus() {
+        // Get the HTTP status code of the current script's resource
+        return http_response_code();
     }
 }
